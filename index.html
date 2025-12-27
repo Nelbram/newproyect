@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brazo Robótico EMG - Vida Nueva</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+    <style>
+        :root {
+            --neon-blue: #00f2ff;
+            --neon-purple: #bc13fe;
+            --dark-bg: #050505;
+        }
+
+        body {
+            background: linear-gradient(rgba(5, 5, 5, 0.85), rgba(5, 5, 5, 0.85)), 
+                        url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=2070') no-repeat center center fixed;
+            background-size: cover;
+            color: var(--neon-blue);
+            font-family: 'Share Tech Mono', monospace;
+            overflow-x: hidden;
+        }
+
+        .header-section {
+            border-bottom: 2px solid var(--neon-blue);
+            padding: 20px 0;
+            background: rgba(0, 242, 255, 0.05);
+            margin-bottom: 30px;
+        }
+
+        .institution-name {
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 5px;
+            color: #fff;
+            font-size: 1.2rem;
+        }
+
+        .glass-card {
+            background: rgba(15, 15, 15, 0.9);
+            border: 1px solid var(--neon-blue);
+            border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.1);
+            padding: 25px;
+            height: 100%;
+        }
+
+        .emg-circle-container {
+            position: relative;
+            width: 250px;
+            margin: 0 auto;
+        }
+
+        .status-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            border: 1px solid var(--neon-blue);
+        }
+
+        .online { color: #00ff88; box-shadow: 0 0 10px #00ff88 inset; }
+        .offline { color: #ff0055; box-shadow: 0 0 10px #ff0055 inset; }
+
+        .creator-tag { color: var(--neon-purple); font-weight: bold; }
+
+        input[type=range] {
+            filter: hue-rotate(150deg) brightness(1.5);
+        }
+    </style>
+</head>
+<body>
+
+<div class="header-section text-center">
+    <p class="institution-name mb-1">INSTITUTO SUPERIOR VIDA NUEVA</p>
+    <h1 class="display-5 fw-bold" style="font-family: 'Orbitron';">SISTEMA EMG - PROTOTIPO V1.0</h1>
+    <p class="mb-0">Proyecto de Robótica Avanzada | <span class="creator-tag">Romero • Parreño • Congo</span></p>
+    <div class="mt-2">
+        <span id="conn-status" class="status-badge offline">OFFLINE</span>
+    </div>
+</div>
+
+<div class="container-fluid px-4">
+    <div class="row g-4">
+        <div class="col-lg-4">
+            <div class="glass-card text-center">
+                <h4 class="mb-4">REAL-TIME SIGNAL</h4>
+                <div class="emg-circle-container">
+                    <canvas id="gaugeChart"></canvas>
+                    <div id="emg-val-text" style="position: absolute; top: 55%; left: 50%; transform: translate(-50%, -50%); font-size: 2rem; font-weight: bold;">0</div>
+                </div>
+                <div class="mt-4">
+                    <button id="btn-auto" class="btn btn-outline-info w-100 mb-2 active" onclick="setModo('automatico')">INTELIGENCIA EMG (AUTO)</button>
+                    <button id="btn-manual" class="btn btn-outline-secondary w-100" onclick="setModo('manual')">CONTROL MANUAL</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="glass-card">
+                <h4 class="text-center mb-4">SINE WAVE MONITOR</h4>
+                <canvas id="lineChart" height="250"></canvas>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="glass-card">
+                <h4 class="text-center mb-4">ACTUADORES (SERVOS)</h4>
+                <div id="servo-list">
+                    </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // CONFIGURACIÓN FIREBASE
+    const firebaseConfig = { databaseURL: "https://comunicacionesp32-default-rtdb.firebaseio.com" };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // GENERAR SLIDERS DINÁMICAMENTE
+    const servoList = document.getElementById('servo-list');
+    for(let i=1; i<=5; i++){
+        servoList.innerHTML += `
+            <div class="mb-3">
+                <div class="d-flex justify-content-between small"><span>DEDO 0${i}</span><span id="val-${i}">90°</span></div>
+                <input type="range" class="form-range" min="0" max="180" oninput="updateServo(${i}, this.value)">
+            </div>
+        `;
+    }
+
+    // CONFIGURAR GRÁFICA GAUGE (Circular)
+    const gaugeCtx = document.getElementById('gaugeChart').getContext('2d');
+    const gaugeChart = new Chart(gaugeCtx, {
+        type: 'doughnut',
+        data: {
+            datasets: [{
+                data: [0, 4095],
+                backgroundColor: ['#00f2ff', '#1a1a1a'],
+                borderWidth: 0,
+                circumference: 270,
+                rotation: 225
+            }]
+        },
+        options: { cutout: '85%', plugins: { tooltip: {enabled: false} } }
+    });
+
+    // CONFIGURAR GRÁFICA DE LÍNEA
+    const lineCtx = document.getElementById('lineChart').getContext('2d');
+    const lineChart = new Chart(lineCtx, {
+        type: 'line',
+        data: {
+            labels: Array(20).fill(''),
+            datasets: [{
+                label: 'EMG Amplitude',
+                data: Array(20).fill(0),
+                borderColor: '#bc13fe',
+                tension: 0.4,
+                pointRadius: 0
+            }]
+        },
+        options: { scales: { y: { min: 0, max: 4095 } }, animation: false }
+    });
+
+    // ACTUALIZACIÓN DE DATOS DESDE FIREBASE
+    db.ref(".info/connected").on("value", s => {
+        const badge = document.getElementById('conn-status');
+        badge.innerText = s.val() ? "SYSTEM ONLINE" : "OFFLINE";
+        badge.className = s.val() ? "status-badge online" : "status-badge offline";
+    });
+
+    db.ref("brazo_robotico/emg_valor").on("value", snap => {
+        const val = snap.val() || 0;
+        document.getElementById('emg-val-text').innerText = val;
+        
+        // Actualizar Gauge
+        gaugeChart.data.datasets[0].data = [val, 4095 - val];
+        gaugeChart.update();
+
+        // Actualizar Línea
+        lineChart.data.datasets[0].data.push(val);
+        lineChart.data.datasets[0].data.shift();
+        lineChart.update();
+    });
+
+    function setModo(m) {
+        db.ref("brazo_robotico/modo").set(m);
+        document.getElementById('btn-auto').className = m === 'automatico' ? 'btn btn-outline-info w-100 mb-2 active' : 'btn btn-outline-info w-100 mb-2';
+        document.getElementById('btn-manual').className = m === 'manual' ? 'btn btn-outline-info w-100 active' : 'btn btn-outline-secondary w-100';
+    }
+
+    function updateServo(id, val) {
+        document.getElementById(`val-${id}`).innerText = val + "°";
+        db.ref(`brazo_robotico/servos/dedo${id}`).set(parseInt(val));
+    }
+</script>
+
+</body>
+</html>
